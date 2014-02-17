@@ -29,6 +29,11 @@
 #include "PyServiceCD.h"
 #include "ship/InsuranceService.h"
 
+/* TODO:
+ *   - handle ship-destroyed event (remove insurance, pay out value, etc...)
+ *   - use history market value from marketProxy!
+ */
+
 class InsuranceBound
 : public PyBoundObject
 {
@@ -42,7 +47,9 @@ public:
     {
         _SetCallDispatcher(m_dispatch);
 
+        PyCallable_REG_CALL(InsuranceBound, GetContracts)
         PyCallable_REG_CALL(InsuranceBound, GetInsurancePrice)
+        PyCallable_REG_CALL(InsuranceBound, InsureShip)
 
         m_strBoundObjectName = "InsuranceBound";
     }
@@ -53,7 +60,9 @@ public:
         delete this;
     }
 
+    PyCallable_DECL_CALL(GetContracts)
     PyCallable_DECL_CALL(GetInsurancePrice)
+    PyCallable_DECL_CALL(InsureShip)
 
 protected:
     ShipDB* m_db;
@@ -69,6 +78,7 @@ InsuranceService::InsuranceService(PyServiceMgr *mgr)
     _SetCallDispatcher(m_dispatch);
 
     PyCallable_REG_CALL(InsuranceService, GetContractForShip)
+    PyCallable_REG_CALL(InsuranceService, GetInsurancePrice)
 }
 
 InsuranceService::~InsuranceService() {
@@ -86,44 +96,120 @@ PyBoundObject* InsuranceService::_CreateBoundObject( Client* c, const PyRep* bin
 PyResult InsuranceService::Handle_GetInsurancePrice( PyCallArgs& call )
 {
     sLog.Debug("InsuranceService", "Called GetInsurancePrice stub" );
+
+	call.Dump(DEBUG__DEBUG);
+
     return new PyFloat(0.0);
 }
 
-PyResult InsuranceBound::Handle_GetInsurancePrice( PyCallArgs& call )
+PyResult InsuranceBound::Handle_GetInsurancePrice(PyCallArgs& call)
 {
-    sLog.Debug("InsuranceBound", "Called GetInsurancePrice stub" );
-    return new PyFloat(0.0);
+	/*
+	Call Arguments:
+		Tuple: 1 elements
+			[ 0] Integer field: 606		// typeID
+	Call Named Arguments:
+		Argument 'machoVersion':
+			Integer field: 1
+	*/
+	uint32 typeID = call.tuple->GetItem(0)->AsInt()->value();
+
+	const ItemType *type = m_manager->item_factory.GetType(typeID);
+	if(!type)
+		return new PyNone;
+
+	return new PyFloat(type->basePrice());
 }
 
 PyResult InsuranceService::Handle_GetContractForShip( PyCallArgs& call )
 {
-    sLog.Debug( "InsuranceService", "Called GetContractForShip stub." );
+	/*
+	Call Arguments:
+		Tuple: 1 elements
+			[ 0] Integer field: 140000078	// shipID
+	Call Named Arguments:
+		Argument 'machoVersion':
+			Integer field: 1
+	*/
 
-    return new PyNone;
+	uint32 shipID = call.tuple->GetItem(0)->AsInt()->value();
+
+	return m_db.GetInsuranceInfoByShipID(shipID);
 }
 
+PyResult InsuranceBound::Handle_GetContracts( PyCallArgs& call )
+{
+    //sLog.Debug("InsuranceBound", "Called GetContracts WORK IN PROGRESS!" );
 
+	/*
+	Call Arguments:
+		Tuple: Empty
+	*/
+	//call.Dump(DEBUG__DEBUG);
 
+	uint32 ownerID = call.client->GetCharacterID();
 
+	return m_db->GetInsuranceContractsByOwnerID(ownerID);
+}
 
+PyResult InsuranceBound::Handle_InsureShip( PyCallArgs& call )
+{
+	/*
+	Call Arguments:
+	    Tuple: 3 elements
+			[ 0] Integer field: 140000078			// shipID / entityID
+			[ 1] Real field: 1125.000000			// payment in ISK
+			[ 2] Integer field: 0					// ?
+	Call Named Arguments:
+		Argument 'machoVersion':
+			Integer field: 1
+	*/
+//	call.Dump(DEBUG__DEBUG);
 
+	/* INSURANCE FRACTION TABLE:
+			Label    Fraction  Pay
+			-------- --------- ------
+			Platin   1.0       0.3
+			Gold     0.9       0.25
+			Silver   0.8       0.2
+			Bronze   0.7       0.15
+			Standard 0.6       0.1
+			Basis    0.5       0.05
+	*/
 
+	uint32 shipID = call.tuple->GetItem(0)->AsInt()->value();
+	double payment = call.tuple->GetItem(1)->AsFloat()->value();
 
+    ShipRef ship = m_manager->item_factory.GetShip(shipID);
 
+	// calculate the fraction value
+    double shipValue = ship->type().basePrice();
+    double paymentFraction = payment/shipValue;
+	double fraction = 0.0;
+	if(paymentFraction == 0.05)
+		fraction = 0.5;
+	else if(paymentFraction == 0.1)
+		fraction = 0.6;
+	else if(paymentFraction == 0.15)
+		fraction = 0.7;
+	else if(paymentFraction == 0.2)
+		fraction = 0.8;
+	else if(paymentFraction == 0.25)
+		fraction = 0.9;
+	else if(paymentFraction == 0.3)
+		fraction = 1.0;
 
+	if(fraction == 0.0)
+		return new PyNone;
 
+	//  let the player pay for the insurance
+	call.client->AddBalance(-payment);
 
+	// delete old insurance, if any
+	m_db->DeleteInsuranceByShipID(shipID);
 
+	// add new insurance
+	m_db->InsertInsuranceByShipID(shipID, fraction);
 
-
-
-
-
-
-
-
-
-
-
-
-
+	return new PyNone;
+}

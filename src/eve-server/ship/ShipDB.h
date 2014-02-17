@@ -27,6 +27,7 @@
 #ifndef __SHIPDB_H_INCL__
 #define __SHIPDB_H_INCL__
 
+#include "PyCallable.h"
 #include "ServiceDB.h"
 
 class ShipDB
@@ -35,6 +36,11 @@ class ShipDB
 public:
     PyTuple* GetFormations();
     static PyObject* GetEffectInformation(std::string effectName);
+
+	PyPackedRow* GetInsuranceInfoByShipID(uint32 shipID);
+	PyResult GetInsuranceContractsByOwnerID(uint32 ownerID);
+	bool InsertInsuranceByShipID(uint32 shipID, double fraction);
+	bool DeleteInsuranceByShipID(uint32 shipID);
 };
 
 

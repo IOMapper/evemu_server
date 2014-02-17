@@ -805,7 +805,7 @@ bool CharacterDB::SetNote(uint32 ownerID, uint32 itemID, const char *str) {
         if (!sDatabase.RunQuery(err,
             "DELETE FROM `chrNotes` "
             " WHERE itemID = %u AND ownerID = %u LIMIT 1",
-            ownerID, itemID)
+            itemID, ownerID)
             )
         {
             codelog(CLIENT__ERROR, "Error on query: %s", err.c_str());
@@ -819,7 +819,7 @@ bool CharacterDB::SetNote(uint32 ownerID, uint32 itemID, const char *str) {
         if (!sDatabase.RunQuery(err,
             "REPLACE INTO `chrNotes` (itemID, ownerID, note)    "
             "VALUES (%u, %u, '%s')",
-            ownerID, itemID, escaped.c_str())
+            itemID, ownerID, escaped.c_str())
             )
         {
             codelog(CLIENT__ERROR, "Error on query: %s", err.c_str());

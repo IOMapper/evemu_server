@@ -304,9 +304,10 @@ CREATE TABLE `chrMissionState` (
 DROP TABLE IF EXISTS `chrNotes`;
 
 CREATE TABLE `chrNotes` (
-  `itemID` int(10) unsigned NOT NULL default '0',
-  `ownerID` int(10) unsigned default NULL,
-  `note` text
+  `itemID` int(10) unsigned NOT NULL DEFAULT '0',
+  `ownerID` int(10) unsigned NOT NULL DEFAULT '0',
+  `note` text,
+  PRIMARY KEY (`itemID`,`ownerID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 /*Data for the table `chrNotes` */

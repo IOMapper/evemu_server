@@ -25,8 +25,89 @@
 
 #include "eve-server.h"
 
+#include "PyBoundObject.h"
 #include "PyServiceCD.h"
 #include "character/CharMgrService.h"
+
+class CharMgrBound 
+	: public PyBoundObject
+{
+public:
+	PyCallable_Make_Dispatcher(CharMgrBound);
+
+    CharMgrBound(PyServiceMgr *mgr, uint32 characterID) 
+		: PyBoundObject(mgr), 
+		m_dispatch(new Dispatcher(this)),
+		m_characterID(characterID)
+    {
+        _SetCallDispatcher(m_dispatch);
+
+        m_strBoundObjectName = "CharMgrBound";
+
+		PyCallable_REG_CALL(CharMgrBound, ListStations);
+		PyCallable_REG_CALL(CharMgrBound, ListStationItems);
+	}
+
+    virtual ~CharMgrBound() {delete m_dispatch;}
+
+	virtual void Release() {
+        //I hate this statement
+        delete this;
+    }
+
+    PyCallable_DECL_CALL(ListStations)
+    PyCallable_DECL_CALL(ListStationItems)
+
+protected:
+    Dispatcher *const m_dispatch;
+
+    uint32 m_characterID;
+};
+
+PyResult CharMgrBound::Handle_ListStations( PyCallArgs& call )
+{
+	// TODO: really query the database directly?
+    DBQueryResult res;
+	if(!sDatabase.RunQuery(res, "SELECT locationID AS stationID, COUNT(itemID) as itemCount FROM entity WHERE ownerID=%d AND flag=4 GROUP BY locationID", m_characterID))
+	{
+        codelog(SERVICE__ERROR, "Error in query: %s", res.error.c_str());
+		return NULL;
+	}
+	return(DBResultToCRowset(res));
+}
+
+PyResult CharMgrBound::Handle_ListStationItems( PyCallArgs& call )
+{
+	uint32 locationID = call.tuple->GetItem(0)->AsInt()->value();
+
+	// TODO: really query the database directly?
+	DBQueryResult res;
+	if(!sDatabase.RunQuery(res, 
+		"SELECT "
+		"  e.itemID, "
+		"  e.itemName, "
+		"  e.typeID, "
+		"  e.ownerID, "
+		"  e.locationID, "
+		"  e.flag as flagID, "
+		"  e.quantity as stacksize, "
+		"  e.customInfo, "
+		"  e.singleton, "
+		"  g.categoryID, "
+		"  g.groupID "
+		"FROM "
+		"  (entity e LEFT JOIN invtypes t ON e.typeID=t.typeID) LEFT JOIN invgroups g ON t.groupID=g.groupID "
+		"WHERE "
+		"  e.ownerID=%d AND "
+		"  e.locationID=%d AND "
+		"  e.flag=4"
+		, m_characterID, locationID))
+	{
+        codelog(SERVICE__ERROR, "Error in query: %s", res.error.c_str());
+		return NULL;
+	}
+	return(DBResultToCRowset(res));
+}
 
 PyCallable_Make_InnerDispatcher(CharMgrService)
 
@@ -48,10 +129,27 @@ CharMgrService::CharMgrService(PyServiceMgr *mgr)
     PyCallable_REG_CALL(CharMgrService, GetSettingsInfo)
     PyCallable_REG_CALL(CharMgrService, GetCharacterDescription)
     PyCallable_REG_CALL(CharMgrService, SetCharacterDescription)
+    PyCallable_REG_CALL(CharMgrService, GetNote)
+    PyCallable_REG_CALL(CharMgrService, SetNote)
 }
 
 CharMgrService::~CharMgrService() {
     delete m_dispatch;
+}
+
+PyBoundObject *CharMgrService::_CreateBoundObject(Client *c, const PyRep *bind_args) {
+    Call_TwoIntegerArgs args;
+    //crap
+    PyRep *t = bind_args->Clone();
+    if(!args.Decode(&t)) {
+        _log(SERVICE__ERROR, "%s: Failed to decode bind object params.", GetName());
+        return NULL;
+    }
+	//bind_args->Dump(SERVICE__ERROR, "    ");
+    //arg1 = characterID
+    //arg2 = ??? (i.e.: 10002)
+
+	return(new CharMgrBound(m_manager, args.arg1));
 }
 
 PyResult CharMgrService::Handle_GetContactList(PyCallArgs &call)
@@ -224,4 +322,29 @@ PyResult CharMgrService::Handle_SetCharacterDescription(PyCallArgs &call)
     c->SetDescription(args.arg.c_str());
 
     return NULL;
+}
+
+PyResult CharMgrService::Handle_GetNote(PyCallArgs &call)
+{
+    uint32 ownerID = call.client->GetCharacterID();
+    uint32 itemID = call.tuple->GetItem(0)->AsInt()->value();
+
+    PyString *str = m_db.GetNote(ownerID, itemID);
+    if(!str)
+        str = new PyString("");
+
+    return str;
+}
+
+PyResult CharMgrService::Handle_SetNote(PyCallArgs &call)
+{
+    Call_SetNote args;
+    if(!args.Decode(&call.tuple)) {
+        codelog(CLIENT__ERROR, "Invalid arguments");
+        return NULL;
+    }
+
+    m_db.SetNote(call.client->GetCharacterID(), args.itemID, args.note.c_str());
+
+    return new PyNone;
 }
